@@ -16,7 +16,7 @@ def featureTracking(image_ref, image_cur, px_ref):
 	st = st.reshape(-1)
 	kp1 = px_ref[st == 1]
 	kp2 = kp2[st == 1]
-	print(kp1.shape, kp2.shape, st.shape, '---', image_ref.shape, image_cur.shape)
+	# print(kp1.shape, kp2.shape, st.shape, '---', image_ref.shape, image_cur.shape)
 	return kp1, kp2
 
 
@@ -34,15 +34,13 @@ class PinholeCamera:
 
 class VisualOdometry:
 	def __init__(self, cam, annotations):
-		self.state = 0
+		self.state = INIT_STATE_1
 		self.cam = cam
-		self.new_frame = None
-		self.last_frame = None
+		self.ref_frame = None
 		self.cur_R = None
 		self.cur_t = None
 		self.px_ref = None
 		self.px_cur = None
-		self.focal = cam.fx
 		self.pp = (cam.cx, cam.cy)
 		self.trueX, self.trueY, self.trueZ = 0, 0, 0
 		self.detector = cv2.FastFeatureDetector_create(threshold=25, nonmaxSuppression=True)
@@ -61,40 +59,48 @@ class VisualOdometry:
 		self.trueX, self.trueY, self.trueZ = x, y, z
 		return np.sqrt((x - x_prev)**2 + (y - y_prev)**2 + (z - z_prev)**2)
 
-	def processFrame(self, frame_id):
-		self.px_ref, self.px_cur = featureTracking(self.last_frame, self.new_frame, self.px_ref)
-		E, mask = cv2.findEssentialMat(self.px_cur, self.px_ref, focal=self.focal, pp=self.pp, method=cv2.RANSAC, prob=0.999, threshold=1.0)
-		_, R, t, mask = cv2.recoverPose(E, self.px_cur, self.px_ref, focal=self.focal, pp = self.pp)
+	def get_T(self):
+		if self.state == VO_NORMAL:
+			return self.cur_t[0], self.cur_t[1], self.cur_t[2]
+		else:
+			return 0, 0, 0
+
+	def processFrame(self, img, frame_id):
+		self.px_ref, self.px_cur = featureTracking(self.ref_frame, img, self.px_ref)
+		E, mask = cv2.findEssentialMat(self.px_cur, self.px_ref, focal=self.cam.fx, pp=self.pp, method=cv2.RANSAC, prob=0.999, threshold=1.0)
+		_, R, t, mask = cv2.recoverPose(E, self.px_cur, self.px_ref, focal=self.cam.fx, pp = self.pp)
 		
 		absolute_scale = self.getAbsoluteScale(frame_id)
-		if absolute_scale > 0.1:
-			self.cur_t = self.cur_t + absolute_scale*self.cur_R.dot(t) 
-			self.cur_R = R.dot(self.cur_R)
+		print('absolute_scale', absolute_scale / ( self.cur_R.dot(t) **2).mean())
+		self.cur_t = self.cur_t + absolute_scale*self.cur_R.dot(t) 
+		self.cur_R = R.dot(self.cur_R)
 
 		if self.px_ref.shape[0] < kMinNumFeature:
 			print('new keyframe', frame_id, self.px_ref.shape)
-			self.px_cur = self.detector.detect(self.new_frame)
+			self.px_cur = self.detector.detect(img)
 			self.px_cur = np.array([x.pt for x in self.px_cur], dtype=np.float32)
-
+			self.ref_frame = img
+			
 		self.px_ref = self.px_cur
 
 	def update(self, img, frame_id):
 		assert(img.ndim==2 and img.shape[0]==self.cam.height and img.shape[1]==self.cam.width), "Frame: provided image has not the same size as the camera model or image is not grayscale"
-		self.new_frame = img
-
+		
 		if self.state == INIT_STATE_1:
-			self.px_ref = self.detector.detect(self.new_frame)
+			self.px_ref = self.detector.detect(img)
 			self.px_ref = np.array([x.pt for x in self.px_ref], dtype=np.float32)
+			self.ref_frame = img
 			self.state = INIT_STATE_2
 
 		elif self.state == INIT_STATE_2:
-			self.px_ref, self.px_cur = featureTracking(self.last_frame, self.new_frame, self.px_ref)
-			E, mask = cv2.findEssentialMat(self.px_cur, self.px_ref, focal=self.focal, pp=self.pp, method=cv2.RANSAC, prob=0.999, threshold=1.0)
-			_, self.cur_R, self.cur_t, mask = cv2.recoverPose(E, self.px_cur, self.px_ref, focal=self.focal, pp = self.pp)
+			self.px_ref, self.px_cur = featureTracking(self.ref_frame, img, self.px_ref)
+			E, mask = cv2.findEssentialMat(self.px_cur, self.px_ref, focal=self.cam.fx, pp=self.pp, method=cv2.RANSAC, prob=0.999, threshold=1.0)
+			_, self.cur_R, self.cur_t, mask = cv2.recoverPose(E, self.px_cur, self.px_ref, focal=self.cam.fx, pp = self.pp)
 			self.px_ref = self.px_cur
+			self.ref_frame = img
 			self.state = VO_NORMAL
 
 		elif self.state == VO_NORMAL:
-			self.processFrame(frame_id)
+			self.processFrame(img ,frame_id)
 
-		self.last_frame = self.new_frame
+		
