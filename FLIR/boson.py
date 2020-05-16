@@ -11,15 +11,15 @@ while(True):
     cv2.imshow('ir_image',ir_image)
 
     now = datetime.datetime.now()
-    print(now.hour, now.minute, now.second)
-    if now.second == 0:
-        fn = 'ir_record/ir_%02d_%02d_%02d.png'%(now.hour, now.minute, now.second)
+    print('now:%02d:%02d:%02d'%(now.hour, now.minute, now.second))
+    if now.second == 0 or now.second ==1:
+        fn = 'ir_record/ir_%02d_%02d.png'%(now.hour, now.minute)
         if not os.path.exists(fn):
             print(fn)
             cv2.imwrite(fn, ir_image)
 
-    key = cv2.waitKey(100)
-    if key == 27:    
+    key = cv2.waitKey(1000)
+    if key == 27:
         break
 
 cap.release()

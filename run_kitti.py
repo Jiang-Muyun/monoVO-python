@@ -29,4 +29,3 @@ for img_id in range(4541):
 	if 27 == cv2.waitKey(1):
 		break
 
-cv2.imwrite('map.png', traj)
